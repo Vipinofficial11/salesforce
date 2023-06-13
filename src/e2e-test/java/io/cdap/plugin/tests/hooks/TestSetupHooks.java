@@ -30,11 +30,18 @@ import org.apache.commons.lang3.StringUtils;
 import org.json.JSONObject;
 import org.junit.Assert;
 import stepsdesign.BeforeActions;
+
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.sql.Timestamp;
+import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.time.LocalTime;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -44,23 +51,51 @@ import java.util.UUID;
  * Represents Test Setup and Clean up hooks.
  */
 public class TestSetupHooks {
-
-  @Before(order = 2, value = "@BQ_SINK_TEST")
-  public void setTempTargetBQTable() {
-    String bqTargetTable = "TestSN_table" + RandomStringUtils.randomAlphanumeric(10);
-    PluginPropertyUtils.addPluginProp("bqTargetTable", bqTargetTable);
-    BeforeActions.scenario.write("BigQuery Target table name: " + bqTargetTable);
+  public static void main(String[] args) throws IOException, ParseException, InterruptedException {
+    //createCustom();
+   //SalesforceClient.queryObject("a03Dn000008c4D8IAI",SObjects.AUTOMATION_CUSTOM__C.value);
+    SalesforceClient.deleteId("a03Dn000008c4DmIAI",SObjects.AUTOMATION_CUSTOM__C.value);
+    //createTempSourceBQTable();
+    //SalesforceClient.queryObjectByOther("Col_Email__c","ankit2627@gmail.com",SObjects.AUTOMATION_CUSTOM__C.value);
   }
 
   @Before(order = 3, value = "@LEAD")
-  public static void createLead() {
-    BeforeActions.scenario.write("Creating new Lead..");
+  public static void createCustom() throws UnsupportedEncodingException, ParseException {
+    //BeforeActions.scenario.write("Creating new Lead..");
 
-    JSONObject lead = new JSONObject();
+    JSONObject custom = new JSONObject(PluginPropertyUtils.pluginProp("CustomObjectData"));
     String uniqueId = RandomStringUtils.randomAlphanumeric(10);
-    lead.put("FirstName", "LFname_" + uniqueId);
-    lead.put("LastName", "LLname_" + uniqueId);
-    lead.put("Company", uniqueId + ".com");
+
+    //String dateString = "2023-06-14 12:34:56";
+//    DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+//      Date date = dateFormat.parse(dateString);
+//      long timestamp = date.getTime();
+//    String date2 = "2023-06-14";
+//    DateFormat dateFormat2 = new SimpleDateFormat("yyyy-MM-dd");
+//    Date dates = dateFormat2.parse(date2);
+//    String formattedD = dateFormat2.format(dates);
+//    LocalTime time = LocalTime.of(10, 30, 0);
+//      custom.put("Col_Timestamp__c",timestamp);
+//      custom.put("Name","aman");
+//      custom.put("Col_Date__c",formattedD);
+//      custom.put("Col_Currency__c",123.456);
+//      custom.put("Col_Email__c","ankit2627@gmail.com");
+//      custom.put("Col__c",984746334);
+//      custom.put("Col_Text__c","hello");
+//      custom.put("Col_Url__c","abc/123");
+//      custom.put("Col_Number__c",1008);
+//      custom.put("Col_Time__c",time);
+//      custom.put("Col_GeoLocation__Latitude__s",37.794016);
+//      custom.put("Col_GeoLocation__Longitude__s",-122.395016);
+//     // custom.put("Col_GeoLocation__c",37.794016);
+    String Id=SalesforceClient.createObject(custom, SObjects.AUTOMATION_CUSTOM__C.value);
+
+  }
+
+
+  public static void createTempSourceBQTable() throws IOException, InterruptedException {
+    createSourceBQTableWithQueries(PluginPropertyUtils.pluginProp("CreateBQTableQueryFile"),
+                                   PluginPropertyUtils.pluginProp("InsertBQDataQueryFile"));
   }
 
   @After(order = 1, value = "@BQ_TEMP_CLEANUP")
@@ -82,10 +117,10 @@ public class TestSetupHooks {
   /**
    * Create BigQuery table with 3 columns (FirstName - string, LastName - string, Company - string) containing random
    * test data.
-   *
+   * <p>
    * Sample row:
    * FirstName | LastName | Company                               |
-   *     22    | 968      | 245308db-6088-4db2-a933-f0eea650846a  |
+   * 22    | 968      | 245308db-6088-4db2-a933-f0eea650846a  |
    */
   @Before(order = 1, value = "@BQ_SOURCE_TEST")
   public static void createTempSourceBQTableForLeadSObject() throws IOException, InterruptedException {
@@ -99,8 +134,9 @@ public class TestSetupHooks {
     String company = uniqueId + ".com";
 
     BigQueryClient.getSoleQueryResult("create table `" + bqSourceDataset + "." + bqSourceTable + "` as " +
-      "SELECT * FROM UNNEST([ STRUCT('" + firstName + "' AS FirstName, '" + lastName + "' AS LastName, '"
-      + company + "' AS Company)])");
+                                        "SELECT * FROM UNNEST([ STRUCT('" + firstName + "' AS FirstName, '" +
+                                        lastName + "' AS LastName, '"
+                                        + company + "' AS Company)])");
     BeforeActions.scenario.write("BQ source Table " + bqSourceTable + " created successfully");
   }
 
@@ -123,6 +159,7 @@ public class TestSetupHooks {
         , StandardCharsets.UTF_8);
       createTableQuery = createTableQuery.replace("DATASET", PluginPropertyUtils.pluginProp("dataset"))
         .replace("TABLE_NAME", bqSourceTable);
+      System.out.println(bqSourceTable);
     } catch (Exception e) {
       BeforeActions.scenario.write("Exception in reading " + bqCreateTableQueryFile + " - " + e.getMessage());
       Assert.fail("Exception in BigQuery testdata prerequisite setup " +
@@ -163,5 +200,12 @@ public class TestSetupHooks {
   public static void deletePushTopic() {
     String pushTopicName = SalesforcePropertiesPageActions.topicName;
     SalesforceClient.deletePushTopic(pushTopicName);
+  }
+
+  @Before(order = 2, value = "@BQ_SINK_TEST")
+  public void setTempTargetBQTable() {
+    String bqTargetTable = "TestSN_table" + RandomStringUtils.randomAlphanumeric(10);
+    PluginPropertyUtils.addPluginProp("bqTargetTable", bqTargetTable);
+    BeforeActions.scenario.write("BigQuery Target table name: " + bqTargetTable);
   }
 }
