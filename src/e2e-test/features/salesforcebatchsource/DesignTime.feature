@@ -19,7 +19,7 @@
 
 Feature: Salesforce Batch Source - Design time Scenarios
 
-  @BATCH-TS-SF-DSGN-01 @R
+  @BATCH-TS-SF-DSGN-01
   Scenario Outline: Verify user should be able to get output schema for a valid SOQL query
     When Open Datafusion Project to configure pipeline
     And Select data pipeline type as: "Batch"
@@ -34,7 +34,7 @@ Feature: Salesforce Batch Source - Design time Scenarios
       | SIMPLE        | simple.query.schema               |
       | CHILDTOPARENT | ChildToParent.query.schema        |
 
-  @BATCH-TS-SF-DSGN-02 @R
+  @BATCH-TS-SF-DSGN-02
   Scenario Outline: Verify user should be able to get output schema for a valid SObject Name
     When Open Datafusion Project to configure pipeline
     And Select data pipeline type as: "Batch"
