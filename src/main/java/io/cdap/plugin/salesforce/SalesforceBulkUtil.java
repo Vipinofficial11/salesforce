@@ -38,9 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -57,17 +55,24 @@ public final class SalesforceBulkUtil {
   /**
    * Create a new job using the Bulk API.
    *
+   * @param bulkConnection  BulkConnection object that will connect to salesforce server using bulk APIs.
+   * @param sObject         sObject name
+   * @param operationEnum   Operation that need to be performed on sObject
+   * @param externalIdField externalIdField will be used in case of update/upsert operation.
+   * @param concurrencyMode concurrencyMode can be serial/parallel.
+   * @param contentType     contentType will be CSV for query jobs and ZIP_CSV for insert jobs.
    * @return The JobInfo for the new job.
    * @throws AsyncApiException if there is an issue creating the job
    */
+
   public static JobInfo createJob(BulkConnection bulkConnection, String sObject, OperationEnum operationEnum,
                                   @Nullable String externalIdField,
-                                  ConcurrencyMode concurrencyMode) throws AsyncApiException {
+                                  ConcurrencyMode concurrencyMode, ContentType contentType) throws AsyncApiException {
     JobInfo job = new JobInfo();
     job.setObject(sObject);
     job.setOperation(operationEnum);
     job.setConcurrencyMode(concurrencyMode);
-    job.setContentType(ContentType.CSV);
+    job.setContentType(contentType);
     if (externalIdField != null) {
       job.setExternalIdFieldName(externalIdField);
     }
@@ -113,23 +118,20 @@ public final class SalesforceBulkUtil {
        */
       CSVReader rdr = new CSVReader(bulkConnection.getBatchResultStream(job.getId(), batchInfo.getId()));
       List<String> resultHeader = rdr.nextRecord();
-      int resultCols = resultHeader.size();
+      int successRowId = resultHeader.indexOf("Success");
+      int errorRowId = resultHeader.indexOf("Error");
 
       List<String> row;
       while ((row = rdr.nextRecord()) != null) {
-        Map<String, String> resultInfo = new HashMap<>();
-        for (int i = 0; i < resultCols; i++) {
-          resultInfo.put(resultHeader.get(i), row.get(i));
-        }
-        boolean success = Boolean.parseBoolean(resultInfo.get("Success"));
+        boolean success = Boolean.parseBoolean(row.get(successRowId));
         if (!success) {
-          String error = resultInfo.get("Error");
+          String error = row.get(errorRowId);
           String errorMessage = String.format("Failed to create row with error: '%s'. BatchId='%s'",
                                               error, batchInfo.getId());
           if (ignoreFailures) {
             LOG.error(errorMessage);
           } else {
-            throw new RuntimeException(errorMessage);
+            throw new BulkAPIBatchException(errorMessage, batchInfo);
           }
         }
       }
@@ -174,6 +176,12 @@ public final class SalesforceBulkUtil {
                 throw new BulkAPIBatchException("Batch failed", b);
               }
             } else if (b.getState() == BatchStateEnum.Completed) {
+              LOG.debug("Batch Completed with Batch Id:{}, Total Processed Records: {}, Failed Records: {}," +
+                          " Successful records: {}",
+                        b.getId(),
+                        b.getNumberRecordsProcessed(),
+                        b.getNumberRecordsFailed(),
+                        b.getNumberRecordsProcessed() - b.getNumberRecordsFailed());
               incomplete.remove(b.getId());
             }
           }

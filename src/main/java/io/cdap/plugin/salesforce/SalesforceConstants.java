@@ -15,6 +15,10 @@
  */
 package io.cdap.plugin.salesforce;
 
+import io.cdap.cdap.api.plugin.PluginConfig;
+
+import java.util.function.Function;
+
 /**
  * Constants related to Salesforce and configuration
  */
@@ -44,8 +48,11 @@ public class SalesforceConstants {
   public static final int SOQL_MAX_LENGTH = 20000;
 
   public static final int DEFAULT_CONNECTION_TIMEOUT_MS = 30000;
+  public static final int DEFAULT_READ_TIMEOUT_SEC = 18000;
   public static final String PROPERTY_CONNECT_TIMEOUT = "connectTimeout";
+  public static final String PROPERTY_READ_TIMEOUT = "readTimeout";
   public static final String CONFIG_CONNECT_TIMEOUT = "mapred.salesforce.connectTimeout";
+  public static final String CONFIG_READ_TIMEOUT = "mapred.salesforce.readTimeout";
 
   public static final String PROPERTY_PROXY_URL = "proxyUrl";
   public static final String CONFIG_PROXY_URL = "mapred.salesforce.proxyUrl";
@@ -53,4 +60,7 @@ public class SalesforceConstants {
 
   public static final String PROPERTY_MAX_RETRY_TIME_IN_MINS = "cdap.streaming.maxRetryTimeInMins";
   public static final long DEFAULT_MAX_RETRY_TIME_IN_MINS = 360L;
+
+  public static Function<PluginConfig, Boolean> isOAuthMacroFunction = config -> config.containsMacro(
+    PROPERTY_OAUTH_INFO);
 }

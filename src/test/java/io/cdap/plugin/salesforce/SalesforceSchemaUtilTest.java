@@ -15,12 +15,18 @@
  */
 package io.cdap.plugin.salesforce;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.sforce.soap.partner.Field;
 import com.sforce.soap.partner.FieldType;
+import io.cdap.cdap.api.data.format.StructuredRecord;
 import io.cdap.cdap.api.data.schema.Schema;
 import io.cdap.cdap.etl.mock.common.MockPipelineConfigurer;
 import io.cdap.cdap.etl.mock.validation.MockFailureCollector;
-import io.cdap.plugin.salesforce.plugin.SalesforceConnectorConfig;
+import io.cdap.plugin.salesforce.plugin.SalesforceConnectorInfo;
+import io.cdap.plugin.salesforce.plugin.sink.batch.CSVRecord;
+import io.cdap.plugin.salesforce.plugin.sink.batch.FileUploadSobject;
+import io.cdap.plugin.salesforce.plugin.sink.batch.StructuredRecordToCSVRecordTransformer;
 import io.cdap.plugin.salesforce.plugin.source.batch.SalesforceBatchMultiSource;
 import io.cdap.plugin.salesforce.plugin.source.batch.SalesforceBatchSource;
 import io.cdap.plugin.salesforce.plugin.source.batch.SalesforceMultiSourceConfig;
@@ -119,34 +125,93 @@ public class SalesforceSchemaUtilTest {
 
     Schema actualSchema = SalesforceSchemaUtil.getSchemaWithFields(sObjectDescriptor, describeResult);
 
-    Schema expectedSchema = Schema.recordOf("output",
-      Schema.Field.of("Id", Schema.of(Schema.Type.LONG)),
-      Schema.Field.of("Name", Schema.of(Schema.Type.STRING)),
-      Schema.Field.of("Amount", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
-      Schema.Field.of("Percent", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
-      Schema.Field.of("ConversionRate", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
-      Schema.Field.of("IsWon", Schema.of(Schema.Type.BOOLEAN)),
-      Schema.Field.of("CreatedDate", Schema.of(Schema.LogicalType.DATE)),
-      Schema.Field.of("CreatedDateTime", Schema.of(Schema.LogicalType.TIMESTAMP_MICROS)),
-      Schema.Field.of("CreatedTime", Schema.of(Schema.LogicalType.TIME_MICROS)),
-      Schema.Field.of("Account_NumberOfEmployees", Schema.of(Schema.Type.LONG)),
-      Schema.Field.of("IdAlias", Schema.of(Schema.Type.LONG)),
-      Schema.Field.of("Cnt", Schema.of(Schema.Type.LONG)),
-      Schema.Field.of("Mx", Schema.of(Schema.LogicalType.DATE)),
-      Schema.Field.of("DayOnlyFunc", Schema.of(Schema.LogicalType.DATE)),
-      Schema.Field.of("GroupingFunc", Schema.of(Schema.Type.INT)),
-      Schema.Field.of("AvgFunc", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
-      Schema.Field.of("CalMonFunc", Schema.of(Schema.Type.INT)),
-      Schema.Field.of("SumFunc", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
-      Schema.Field.of("SumRelFunc", Schema.of(Schema.Type.LONG)),
-      Schema.Field.of(contacts, Schema.arrayOf(Schema.recordOf(contacts,
-        Schema.Field.of("FirstName", Schema.of(Schema.Type.STRING)),
-        Schema.Field.of("Owner_Status", Schema.of(Schema.Type.STRING))))));
+    Schema expectedSchema =
+      Schema.recordOf("output",
+                      Schema.Field.of("Id", Schema.of(Schema.Type.LONG)),
+                      Schema.Field.of("Name", Schema.of(Schema.Type.STRING)),
+                      Schema.Field.of("Amount", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
+                      Schema.Field.of("Percent",
+                                      Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
+                      Schema.Field.of("ConversionRate",
+                                      Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
+                      Schema.Field.of("IsWon", Schema.of(Schema.Type.BOOLEAN)),
+                      Schema.Field.of("CreatedDate", Schema.of(Schema.LogicalType.DATE)),
+                      Schema.Field.of("CreatedDateTime",
+                                      Schema.of(Schema.LogicalType.TIMESTAMP_MICROS)),
+                      Schema.Field.of("CreatedTime", Schema.of(Schema.LogicalType.TIME_MICROS)),
+                      Schema.Field.of("Account_NumberOfEmployees",
+                                      Schema.nullableOf(Schema.of(Schema.Type.LONG))),
+                      Schema.Field.of("IdAlias", Schema.of(Schema.Type.LONG)),
+                      Schema.Field.of("Cnt", Schema.of(Schema.Type.LONG)),
+                      Schema.Field.of("Mx", Schema.of(Schema.LogicalType.DATE)),
+                      Schema.Field.of("DayOnlyFunc", Schema.of(Schema.LogicalType.DATE)),
+                      Schema.Field.of("GroupingFunc", Schema.of(Schema.Type.INT)),
+                      Schema.Field.of("AvgFunc",
+                                      Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
+                      Schema.Field.of("CalMonFunc", Schema.of(Schema.Type.INT)),
+                      Schema.Field.of("SumFunc",
+                                      Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
+                      Schema.Field.of("SumRelFunc",
+                                      Schema.nullableOf(Schema.of(Schema.Type.LONG))),
+                      Schema.Field.of(contacts,
+                                      Schema.arrayOf(Schema.recordOf(contacts,
+                                                                     Schema.Field.of("FirstName", Schema.of(
+                                                                       Schema.Type.STRING)),
+                                                                     Schema.Field.of("Owner_Status",
+                                                                                     Schema.nullableOf(
+                                                                                       Schema.of(
+                                                                                         Schema.Type.STRING)))))));
 
     Assert.assertEquals(expectedSchema, actualSchema);
 
     // Parse the schema as Avro schema to make sure all names are accepted by Avro
     new org.apache.avro.Schema.Parser().parse(actualSchema.toString());
+  }
+
+  @Test
+  public void  testSchemaWithSetAllCustomFieldsNullable() {
+    String objectName = "CustomTable";
+
+    List<SObjectDescriptor.FieldDescriptor> fieldDescriptors = Stream
+            .of("Name", "Value", "CreatedDate")
+            .map(name -> getFieldWithType(name, FieldType.anyType, false))
+            .map(SObjectDescriptor.FieldDescriptor::new)
+            .collect(Collectors.toList());
+    fieldDescriptors.add(new SObjectDescriptor.FieldDescriptor(
+            Collections.singletonList("Name"), null, SalesforceFunctionType.NONE));
+    fieldDescriptors.add(new SObjectDescriptor.FieldDescriptor(
+            Collections.singletonList("Value"), null, SalesforceFunctionType.NONE));
+    fieldDescriptors.add(new SObjectDescriptor.FieldDescriptor(
+            Collections.singletonList("CreatedDate"), null, SalesforceFunctionType.NONE));
+    SObjectDescriptor sObjectDescriptor = new SObjectDescriptor(objectName, fieldDescriptors, ImmutableList.of());
+
+    Map<String, Field> objectFields = new LinkedHashMap<>();
+    objectFields.put("Name", getCustomFieldWithType("Name", FieldType.string, false));
+    objectFields.put("Value", getCustomFieldWithType("Value", FieldType.currency, false));
+    objectFields.put("CreatedDate", getCustomFieldWithType("CreatedDate", FieldType.date, false));
+    SObjectsDescribeResult describeResult = SObjectsDescribeResult.of(ImmutableMap.of(objectName, objectFields));
+
+    // Testing case with flag setAllCustomFieldsNullable = true
+    Schema expectedSchema = Schema.recordOf("output",
+            Schema.Field.of("Name", Schema.nullableOf(Schema.of(Schema.Type.STRING))),
+            Schema.Field.of("Value", Schema.nullableOf(Schema.of(Schema.Type.DOUBLE))),
+            Schema.Field.of("CreatedDate", Schema.nullableOf(Schema.of(Schema.LogicalType.DATE)))
+    );
+
+    Schema actualSchema = SalesforceSchemaUtil.getSchemaWithFields(sObjectDescriptor, describeResult, true);
+
+    Assert.assertEquals(expectedSchema, actualSchema);
+
+    // Testing case with flag setAllCustomFieldsNullable = false
+    expectedSchema = Schema.recordOf("output",
+            Schema.Field.of("Name", Schema.of(Schema.Type.STRING)),
+            Schema.Field.of("Value", Schema.of(Schema.Type.DOUBLE)),
+            Schema.Field.of("CreatedDate", Schema.of(Schema.LogicalType.DATE))
+    );
+
+    actualSchema = SalesforceSchemaUtil.getSchemaWithFields(sObjectDescriptor, describeResult, false);
+
+    Assert.assertEquals(expectedSchema, actualSchema);
   }
 
   @Test
@@ -245,6 +310,13 @@ public class SalesforceSchemaUtilTest {
     SalesforceSchemaUtil.checkCompatibility(actualSchema, providedSchema);
   }
 
+  private Field getCustomFieldWithType(String name, FieldType type, boolean isNillable) {
+    Field customField = getFieldWithType(name, type, isNillable);
+    customField.setCustom(true);
+    return customField;
+
+  }
+
   private Field getFieldWithType(String name, FieldType type, boolean isNillable) {
     Field field = new Field();
     field.setName(name);
@@ -253,7 +325,7 @@ public class SalesforceSchemaUtilTest {
 
     return field;
   }
-  
+
   @Test
   public void testSourceSchemaNotNullIfConnectionMacroAndImportManually() {
     Schema schema = Schema.recordOf("output",
@@ -262,7 +334,7 @@ public class SalesforceSchemaUtilTest {
     SalesforceSourceConfig mockConfig = Mockito.mock(SalesforceSourceConfig.class);
     MockPipelineConfigurer mockPipelineConfigurer = new MockPipelineConfigurer(null);
     SalesforceBatchSource source = new SalesforceBatchSource(mockConfig);
-    SalesforceConnectorConfig mockConnection = Mockito.mock(SalesforceConnectorConfig.class);
+    SalesforceConnectorInfo mockConnection = Mockito.mock(SalesforceConnectorInfo.class);
     Mockito.when(mockConfig.getConnection()).thenReturn(mockConnection);
     Mockito.when(mockConfig.getConnection().canAttemptToEstablishConnection()).thenReturn(false);
     Mockito.when(mockConfig.getSchema()).thenReturn(schema);
@@ -279,7 +351,7 @@ public class SalesforceSchemaUtilTest {
     SalesforceStreamingSourceConfig mockConfig = Mockito.mock(SalesforceStreamingSourceConfig.class);
     MockPipelineConfigurer mockPipelineConfigurer = new MockPipelineConfigurer(null);
     SalesforceStreamingSource source = new SalesforceStreamingSource(mockConfig);
-    SalesforceConnectorConfig mockConnection = Mockito.mock(SalesforceConnectorConfig.class);
+    SalesforceConnectorInfo mockConnection = Mockito.mock(SalesforceConnectorInfo.class);
     Mockito.when(mockConfig.getConnection()).thenReturn(mockConnection);
     mockConfig.referenceName = "TestStreaming";
     Mockito.when(mockConfig.getConnection().canAttemptToEstablishConnection()).thenReturn(false);
@@ -295,10 +367,51 @@ public class SalesforceSchemaUtilTest {
     MockPipelineConfigurer mockPipelineConfigurer = new MockPipelineConfigurer(null);
     SalesforceBatchMultiSource source = new SalesforceBatchMultiSource(mockConfig);
     mockConfig.referenceName = "TestStreaming";
-    SalesforceConnectorConfig mockConnection = Mockito.mock(SalesforceConnectorConfig.class);
+    SalesforceConnectorInfo mockConnection = Mockito.mock(SalesforceConnectorInfo.class);
     Mockito.when(mockConfig.getConnection()).thenReturn(mockConnection);
     Mockito.when(mockConfig.getConnection().canAttemptToEstablishConnection()).thenReturn(false);
     source.configurePipeline(mockPipelineConfigurer);
     Assert.assertNull(mockPipelineConfigurer.getOutputSchema());
+  }
+
+  @Test
+  public void testTransformWithAttachment() {
+    Schema schema = Schema.recordOf("Schema",
+                                    Schema.Field.of("Id", Schema.of(Schema.Type.INT)),
+                                    Schema.Field.of("Name", Schema.of(Schema.Type.STRING)),
+                                    Schema.Field.of("Body", Schema.of(Schema.Type.STRING)));
+    StructuredRecord.Builder builder = StructuredRecord.builder(schema);
+    StructuredRecord record = builder.set("Id", 1)
+      .set("Name", "attachment.pdf").set("Body", "base64-encoded value").build();
+    FileUploadSobject sObjectName = FileUploadSobject.Attachment;
+    // Call the transform method
+    CSVRecord csvRecord = new StructuredRecordToCSVRecordTransformer().transform(record, sObjectName, 1);
+
+    // Verify the results
+    Assert.assertEquals(3, csvRecord.getColumnNames().size());
+    Assert.assertEquals(3, csvRecord.getValues().size());
+    Assert.assertEquals("Id", csvRecord.getColumnNames().get(0));
+    // Body Field value will be replaced with record number concatenated with file name.
+    Assert.assertEquals("#1_attachment.pdf", csvRecord.getValues().get(2));
+  }
+
+  @Test
+  public void testTransformWithoutAttachment() {
+    Schema schema = Schema.recordOf("Schema",
+                                    Schema.Field.of("Id", Schema.of(Schema.Type.INT)),
+                                    Schema.Field.of("Name", Schema.of(Schema.Type.STRING)),
+                                    Schema.Field.of("Body", Schema.of(Schema.Type.STRING)));
+    StructuredRecord.Builder builder = StructuredRecord.builder(schema);
+    StructuredRecord record = builder.set("Id", 1)
+      .set("Name", "attachment.pdf").set("Body", "normal value").build();
+    FileUploadSobject sObjectName = null;
+    // Call the transform method
+    CSVRecord csvRecord = new StructuredRecordToCSVRecordTransformer().transform(record, sObjectName, 1);
+
+    // Verify the results
+    Assert.assertEquals(3, csvRecord.getColumnNames().size());
+    Assert.assertEquals(3, csvRecord.getValues().size());
+    Assert.assertEquals("Id", csvRecord.getColumnNames().get(0));
+    Assert.assertEquals("normal value", csvRecord.getValues().get(2));
   }
 }

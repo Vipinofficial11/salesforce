@@ -1,5 +1,5 @@
 /*
- * Copyright © 2022 Cask Data, Inc.
+ * Copyright © 2023 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -13,7 +13,7 @@
  * License for the specific language governing permissions and limitations under
  * the License.
  */
-package io.cdap.plugin.salesforce.connector;
+package io.cdap.plugin.salesforce.plugin.connector;
 
 import com.sforce.async.AsyncApiException;
 import com.sforce.soap.partner.DescribeGlobalResult;
@@ -48,7 +48,7 @@ import io.cdap.plugin.salesforce.SalesforceConstants;
 import io.cdap.plugin.salesforce.SalesforceSchemaUtil;
 import io.cdap.plugin.salesforce.authenticator.AuthenticatorCredentials;
 import io.cdap.plugin.salesforce.plugin.OAuthInfo;
-import io.cdap.plugin.salesforce.plugin.SalesforceConnectorConfig;
+import io.cdap.plugin.salesforce.plugin.SalesforceConnectorInfo;
 import io.cdap.plugin.salesforce.plugin.sink.batch.SalesforceBatchSink;
 import io.cdap.plugin.salesforce.plugin.sink.batch.SalesforceSinkConfig;
 import io.cdap.plugin.salesforce.plugin.source.batch.MapToRecordTransformer;
@@ -74,24 +74,41 @@ public class SalesforceConnector implements DirectConnector {
   private final SalesforceConnectorConfig config;
   private StructuredRecord record;
 
-  SalesforceConnector(SalesforceConnectorConfig config) {
+  public SalesforceConnector(SalesforceConnectorConfig config) {
     this.config = config;
   }
 
   @Override
   public void test(ConnectorContext connectorContext) throws ValidationException {
     FailureCollector collector = connectorContext.getFailureCollector();
-    OAuthInfo oAuthInfo = SalesforceConnectionUtil.getOAuthInfo(config, collector);
-    config.validate(collector, oAuthInfo);
+    SalesforceConnectorInfo connectorInfo =
+      new SalesforceConnectorInfo(config.getOAuthInfo(), config,
+                                  SalesforceConstants.isOAuthMacroFunction.apply(
+                                    config));
+    OAuthInfo oAuthInfo = SalesforceConnectionUtil.getOAuthInfo(connectorInfo, collector);
+    connectorInfo.validate(collector, oAuthInfo);
   }
 
   @Override
   public BrowseDetail browse(ConnectorContext connectorContext, BrowseRequest browseRequest) throws IOException {
-    AuthenticatorCredentials credentials = new AuthenticatorCredentials(config.getUsername(), config.getPassword(),
+    return browse(false);
+  }
+
+  /**
+   * Browse functionality based on the config.
+   *
+   * @param onlyReturnQueryableObjects Whether to return only the queryable sObjects.
+   * @return BrowseDetail for the given config
+   * @throws IOException In case of Salesforce connection failure while browsing
+   */
+  public BrowseDetail browse(boolean onlyReturnQueryableObjects) throws IOException {
+    AuthenticatorCredentials credentials = AuthenticatorCredentials.fromParameters(
+                                                                        config.getUsername(), config.getPassword(),
                                                                         config.getConsumerKey(),
                                                                         config.getConsumerSecret(),
                                                                         config.getLoginUrl(),
                                                                         config.getConnectTimeout(),
+                                                                        config.getReadTimeoutInMillis(),
                                                                         config.getProxyUrl());
     BrowseDetail.Builder browseDetailBuilder = BrowseDetail.builder();
     int count = 0;
@@ -102,6 +119,13 @@ public class SalesforceConnector implements DirectConnector {
       for (int i = 0; i < dgr.getSobjects().length; i++) {
         String name = dgr.getSobjects()[i].getName();
         String label = dgr.getSobjects()[i].getLabel();
+        boolean isQueryable = dgr.getSobjects()[i].isQueryable();
+
+        // Continue in case of returning only queryable sObjects and the current sObject is non-queryable.
+        if (onlyReturnQueryableObjects && !isQueryable) {
+          continue;
+        }
+
         BrowseEntity.Builder entity = (BrowseEntity.builder(name, name, ENTITY_TYPE_OBJECTS).
           canBrowse(false).canSample(true));
         entity.addProperty(LABEL_NAME, BrowseEntityPropertyValue.builder(label, BrowseEntityPropertyValue.
@@ -128,9 +152,13 @@ public class SalesforceConnector implements DirectConnector {
       properties.put(SalesforceSourceConstants.PROPERTY_SOBJECT_NAME, tableName);
       properties.put(SalesforceSinkConfig.PROPERTY_SOBJECT, tableName);
     }
-    AuthenticatorCredentials authenticatorCredentials = config.getAuthenticatorCredentials();
+    SalesforceConnectorInfo connectorInfo =
+      new SalesforceConnectorInfo(config.getOAuthInfo(), config,
+                                  SalesforceConstants.isOAuthMacroFunction.apply(
+                                    config));
+    AuthenticatorCredentials authenticatorCredentials = connectorInfo.getAuthenticatorCredentials();
     try {
-      String fields = getObjectFields(tableName);
+      String fields = getObjectFields(tableName, authenticatorCredentials);
       String query = String.format("SELECT %s FROM %s", fields, tableName);
       SObjectDescriptor sObjectDescriptor = SObjectDescriptor.fromQuery(query);
       Schema schema = SalesforceSchemaUtil.getSchema(authenticatorCredentials, sObjectDescriptor);
@@ -162,13 +190,12 @@ public class SalesforceConnector implements DirectConnector {
   private List<StructuredRecord> listObjectDetails(String object, int limit) throws AsyncApiException,
     ConnectionException {
     List<StructuredRecord> samples = new ArrayList<>();
-    AuthenticatorCredentials credentials = new AuthenticatorCredentials(config.getUsername(), config.getPassword(),
-                                                                        config.getConsumerKey(),
-                                                                        config.getConsumerSecret(),
-                                                                        config.getLoginUrl(),
-                                                                        config.getConnectTimeout(),
-                                                                        config.getProxyUrl());
-    String fields = getObjectFields(object);
+    SalesforceConnectorInfo connectorInfo =
+      new SalesforceConnectorInfo(config.getOAuthInfo(), config,
+                                  SalesforceConstants.isOAuthMacroFunction.apply(
+                                    config));
+    AuthenticatorCredentials credentials = connectorInfo.getAuthenticatorCredentials();
+    String fields = getObjectFields(object, credentials);
     String query = String.format("SELECT %s FROM %s LIMIT %d", fields, object, limit);
     SObjectDescriptor sObjectDescriptor = SObjectDescriptor.fromQuery(query);
     SoapRecordToMapTransformer soapRecordToMapTransformer = new SoapRecordToMapTransformer();
@@ -185,8 +212,8 @@ public class SalesforceConnector implements DirectConnector {
     return samples;
   }
 
-  private String getObjectFields(String object) throws ConnectionException {
-    SObjectDescriptor sObjectDescriptor = SObjectDescriptor.fromName(object, config.getAuthenticatorCredentials(),
+  private String getObjectFields(String object, AuthenticatorCredentials credentials) throws ConnectionException {
+    SObjectDescriptor sObjectDescriptor = SObjectDescriptor.fromName(object, credentials,
                                                                      SalesforceSchemaUtil.COMPOUND_FIELDS);
     List<String> actualFields = sObjectDescriptor.getFieldsNames();
     String result = String.join(",", actualFields);

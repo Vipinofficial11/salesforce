@@ -19,6 +19,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 import com.sforce.async.AsyncApiException;
 import com.sforce.async.BulkConnection;
+import com.sforce.async.ContentType;
 import com.sforce.async.JobInfo;
 import io.cdap.cdap.api.data.batch.OutputFormatProvider;
 import io.cdap.plugin.salesforce.SalesforceBulkUtil;
@@ -53,7 +54,8 @@ public class SalesforceOutputFormatProvider implements OutputFormatProvider {
       .put(SalesforceSinkConstants.CONFIG_ERROR_HANDLING, config.getErrorHandling().getValue())
       .put(SalesforceSinkConstants.CONFIG_MAX_BYTES_PER_BATCH, config.getMaxBytesPerBatch().toString())
       .put(SalesforceSinkConstants.CONFIG_MAX_RECORDS_PER_BATCH, config.getMaxRecordsPerBatch().toString())
-      .put(SalesforceConstants.CONFIG_CONNECT_TIMEOUT, config.getConnection().getConnectTimeout().toString());
+      .put(SalesforceConstants.CONFIG_CONNECT_TIMEOUT, config.getConnection().getConnectTimeout().toString())
+      .put(SalesforceConstants.CONFIG_READ_TIMEOUT, config.getConnection().getReadTimeout().toString());
 
     if (!Strings.isNullOrEmpty(config.getConnection().getProxyUrl())) {
       configBuilder.put(SalesforceConstants.CONFIG_PROXY_URL, config.getConnection().getProxyUrl());
@@ -82,7 +84,8 @@ public class SalesforceOutputFormatProvider implements OutputFormatProvider {
     try {
       BulkConnection bulkConnection = new BulkConnection(Authenticator.createConnectorConfig(credentials));
       JobInfo job = SalesforceBulkUtil.createJob(bulkConnection, config.getSObject(), config.getOperationEnum(),
-                                                 config.getExternalIdField(), config.getConcurrencyModeEnum());
+                                                 config.getExternalIdField(), config.getConcurrencyModeEnum(),
+                                                 ContentType.ZIP_CSV);
       configBuilder.put(SalesforceSinkConstants.CONFIG_JOB_ID, job.getId());
       LOG.info("Started Salesforce job with jobId='{}'", job.getId());
     } catch (AsyncApiException e) {

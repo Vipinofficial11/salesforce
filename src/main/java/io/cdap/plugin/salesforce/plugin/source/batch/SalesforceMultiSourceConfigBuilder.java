@@ -1,5 +1,5 @@
 /*
- * Copyright © 2022 Cask Data, Inc.
+ * Copyright © 2023 Cask Data, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -38,8 +38,13 @@ public class SalesforceMultiSourceConfigBuilder {
   private String securityToken;
   private OAuthInfo oAuthInfo;
   private String operation;
+  private Long initialRetryDuration;
+  private Long maxRetryDuration;
+  private Integer maxRetryCount;
   private Integer connectTimeout;
+  private Integer readTimeout;
   private String proxyUrl;
+  private Boolean retryOnBackendError;
 
   public SalesforceMultiSourceConfigBuilder setReferenceName(String referenceName) {
     this.referenceName = referenceName;
@@ -121,8 +126,28 @@ public class SalesforceMultiSourceConfigBuilder {
     return this;
   }
 
+  public SalesforceMultiSourceConfigBuilder setInitialRetryDuration(Long initialRetryDuration) {
+    this.initialRetryDuration = initialRetryDuration;
+    return this;
+  }
+
+  public SalesforceMultiSourceConfigBuilder setMaxRetryDuration(Long maxRetryDuration) {
+    this.maxRetryDuration = maxRetryDuration;
+    return this;
+  }
+
+  public SalesforceMultiSourceConfigBuilder setMaxRetryCount(Integer maxRetryCount) {
+    this.maxRetryCount = maxRetryCount;
+    return this;
+  }
+
   public SalesforceMultiSourceConfigBuilder setConnectTimeout(Integer connectTimeout) {
     this.connectTimeout = connectTimeout;
+    return this;
+  }
+
+  public SalesforceMultiSourceConfigBuilder setReadTimeout(Integer readTimeout) {
+    this.readTimeout = readTimeout;
     return this;
   }
 
@@ -133,7 +158,9 @@ public class SalesforceMultiSourceConfigBuilder {
 
   public SalesforceMultiSourceConfig build() {
     return new SalesforceMultiSourceConfig(referenceName, consumerKey, consumerSecret, username, password, loginUrl,
-                                           connectTimeout, datetimeAfter, datetimeBefore, duration, offset, whiteList,
-                                           blackList, sObjectNameField, securityToken, oAuthInfo, operation, proxyUrl);
+                                           connectTimeout, readTimeout, datetimeAfter, datetimeBefore, duration,
+                                           offset, whiteList, blackList, sObjectNameField, securityToken, oAuthInfo,
+                                           operation, initialRetryDuration, maxRetryDuration, maxRetryCount,
+                                           retryOnBackendError, proxyUrl);
   }
 }

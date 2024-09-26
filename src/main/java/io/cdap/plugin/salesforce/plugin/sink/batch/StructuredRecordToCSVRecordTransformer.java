@@ -16,14 +16,21 @@
 package io.cdap.plugin.salesforce.plugin.sink.batch;
 
 import io.cdap.cdap.api.data.format.StructuredRecord;
+import io.cdap.cdap.api.data.format.UnexpectedFormatException;
 import io.cdap.cdap.api.data.schema.Schema;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 
 /**
  * Transforms a {@link StructuredRecord} to a {@link CSVRecord}
@@ -63,7 +70,8 @@ public class StructuredRecordToCSVRecordTransformer {
         case TIME_MICROS:
           // convert timestamp to HH:mm:ss,SSS
           instant = Instant.ofEpochMilli(TimeUnit.MICROSECONDS.toMillis((Long) value));
-          return instant.atZone(ZoneOffset.UTC).toLocalTime().toString();
+          DateTimeFormatter timeFormat = DateTimeFormatter.ofPattern("HH:mm:ss.SSS'Z'");
+          return LocalDateTime.ofInstant(instant, ZoneOffset.UTC).format(timeFormat);
         case TIMESTAMP_MILLIS:
           // convert timestamp to ISO 8601 format
           instant = Instant.ofEpochMilli((Long) value);
@@ -72,6 +80,20 @@ public class StructuredRecordToCSVRecordTransformer {
           // convert timestamp to HH:mm:ss,SSS
           instant = Instant.ofEpochMilli((Long) value);
           return instant.atZone(ZoneOffset.UTC).toLocalTime().toString();
+        case DATETIME:
+          try {
+            LocalDateTime.parse(value.toString());
+          } catch (DateTimeParseException exception) {
+            throw new UnexpectedFormatException(
+              String.format("Datetime field with value '%s' is not in ISO-8601 format.",
+                            fieldSchema.getDisplayName(),
+                            value),
+              exception);
+          }
+          //If properly formatted return the string
+          return value.toString();
+        case DECIMAL:
+          return new BigDecimal(new BigInteger((byte[]) value), fieldSchema.getScale()).toString();
         default:
           throw new IllegalArgumentException(
             String.format("Field '%s' is of unsupported type '%s'", field.getName(), logicalType.getToken()));
@@ -81,18 +103,39 @@ public class StructuredRecordToCSVRecordTransformer {
     return value.toString();
   }
 
-  public CSVRecord transform(StructuredRecord record) {
+  /**
+   * @param record      StructuredRecord that needs to be converted to CSVRecord.
+   * @param sObjectName FileUploadSobject object if record contains base64 encoded field.
+   * @param recordCount recordCount is added to use as a prefix for attachment file to avoid overwriting of files of
+   *                    same name. Same will be used as key in attachment map.
+   * @return CSVRecord
+   */
+  public CSVRecord transform(StructuredRecord record, @Nullable FileUploadSobject sObjectName, int recordCount) {
     List<String> fieldNames = new ArrayList<>();
     List<String> values = new ArrayList<>();
 
     for (Schema.Field field : record.getSchema().getFields()) {
+      String value;
       String fieldName = field.getName();
-      String value = convertSchemaFieldToString(record.get(fieldName), field);
-
+      if (sObjectName != null && sObjectName.getDataField().equalsIgnoreCase(fieldName)) {
+        value = SalesforceSinkConstants.DATA_FIELD_PREFIX + getAttachmentKey(recordCount,
+                                                                             record.get(sObjectName.getNameField()));
+      } else {
+        value = convertSchemaFieldToString(record.get(fieldName), field);
+      }
       fieldNames.add(fieldName);
       values.add(value);
     }
 
     return new CSVRecord(fieldNames, values);
+  }
+
+  /**
+   * @param count          count is added as a prefix to the key to avoid key duplicity in attachmentMap.
+   * @param nameFieldValue name of the file as mentioned in name field.
+   * @return Key for the attachmentMap.
+   */
+  public String getAttachmentKey(int count, String nameFieldValue) {
+    return String.format(SalesforceSinkConstants.ATTACHMENT_MAP_KEY, count, nameFieldValue);
   }
 }
